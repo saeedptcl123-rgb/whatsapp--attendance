@@ -1,3 +1,19 @@
+"""
+agent_logic.py
+
+Core logic for the WhatsApp attendance agent:
+1. Uses the Groq API (llama-3.3-70b-versatile) to extract attendance records
+   (name, date, status) from messy WhatsApp group chat text.
+2. Uses openpyxl to write those records into a company Excel template.
+
+Template layout supported:
+  - Employee names are in one column (name_col, 1-based), e.g. column B.
+  - The header row (header_row, 1-based) holds day numbers (1, 2, 3, ...)
+    or real dates. Each day has its own column.
+  - Attendance status (P / A / L) is written where the employee's row meets
+    the day's column.
+"""
+
 import difflib
 import io
 import json
@@ -414,18 +430,25 @@ def write_total_formulas(worksheet, header_row, name_col, day_cols):
         name_cell = worksheet.cell(row=row, column=name_col)
         if isinstance(name_cell, MergedCell) or name_cell.value in (None, ""):
             continue
-        rng = day_range(row)
-        formulas = {
-            "P": f'=COUNTIF({rng},"P")',
-            "H": f'=COUNTIF({rng},"H")',
-            "L": f'=COUNTIF({rng},"L")',
-            "DAYS": f'=COUNTA({rng})',
+
+        # Count the marks in this row directly and write the numbers.
+        # Numbers (not formulas) show correctly in every viewer, including
+        # previews where formulas are not recalculated.
+        marks = [
+            str(worksheet.cell(row=row, column=col).value or "").strip().upper()
+            for col in range(first_day_col, last_day_col + 1)
+        ]
+        counts = {
+            "P": marks.count("P"),
+            "H": marks.count("H"),
+            "L": marks.count("L"),
+            "DAYS": sum(1 for m in marks if m in {"P", "A", "L", "H"}),
         }
-        for label, formula in formulas.items():
+        for label, value in counts.items():
             if label in label_cols:
                 target = worksheet.cell(row=row, column=label_cols[label])
                 if not isinstance(target, MergedCell):
-                    target.value = formula
+                    target.value = value
 
 
 def fill_attendance_excel(
@@ -542,4 +565,3 @@ def fill_attendance_excel(
         "total_records": len(records),
     }
     return output.getvalue(), summary
-
